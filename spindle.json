@@ -3,8 +3,8 @@
   "name": "Flux Image Generator",
   "identifier": "flux_image_gen",
   "author": "Simplefan",
-  "github": "https://github.com/Simplefan/lumiverse-flux-drawer",
-  "homepage": "https://github.com/Simplefan/lumiverse-flux-drawer",
+  "github": "https://github.com/odieo1/lumiverse-flux-drawer",
+  "homepage": "https://github.com/odieo1/lumiverse-flux-drawer",
   "description": "Adds a Flux image generator tab to the left drawer using Pollinations AI. Free, no API key needed.",
   "permissions": [],
   "entry_frontend": "dist/frontend.js"
