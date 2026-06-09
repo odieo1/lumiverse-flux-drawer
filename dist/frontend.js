@@ -1,13 +1,12 @@
+
 export function setup(ctx) {
 
-  // --- SVG icon for the drawer tab ---
   const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <rect x="2" y="2" width="16" height="16" rx="3"/>
     <circle cx="7" cy="7" r="1.5"/>
     <path d="M2 13l4-4 3 3 3-4 4 5"/>
   </svg>`;
 
-  // --- Register the drawer tab ---
   const tab = ctx.ui.registerDrawerTab({
     id: 'flux_image_gen',
     title: 'Flux Image Generator',
@@ -18,7 +17,6 @@ export function setup(ctx) {
     iconSvg: iconSvg,
   });
 
-  // --- Build the UI inside the drawer tab ---
   tab.root.innerHTML = `
     <style>
       .flux-wrap {
@@ -103,6 +101,8 @@ export function setup(ctx) {
         width: 100%;
         display: block;
         border-radius: 10px 10px 0 0;
+        min-height: 120px;
+        background: var(--color-surface-3, #313244);
       }
       .flux-img-footer {
         padding: 6px 10px;
@@ -138,6 +138,26 @@ export function setup(ctx) {
         letter-spacing: 0.05em;
         color: var(--color-text-muted, #a6adc8);
       }
+      .flux-spinner {
+        display: none;
+        width: 100%;
+        padding: 20px 0;
+        text-align: center;
+      }
+      .flux-spinner.active { display: block; }
+      .flux-spinner::after {
+        content: '';
+        display: inline-block;
+        width: 28px;
+        height: 28px;
+        border: 3px solid var(--color-border, #45475a);
+        border-top-color: var(--color-accent, #cba6f7);
+        border-radius: 50%;
+        animation: flux-spin 0.8s linear infinite;
+      }
+      @keyframes flux-spin {
+        to { transform: rotate(360deg); }
+      }
     </style>
 
     <div class="flux-wrap">
@@ -155,6 +175,7 @@ export function setup(ctx) {
       </div>
 
       <div class="flux-status" id="flux-status"></div>
+      <div class="flux-spinner" id="flux-spinner"></div>
 
       <div class="flux-img-wrap" id="flux-gallery">
         <div class="flux-empty">Your generated images will appear here.</div>
@@ -162,14 +183,14 @@ export function setup(ctx) {
     </div>
   `;
 
-  // --- Wire up the generate button ---
-  const promptEl = tab.root.querySelector('#flux-prompt');
-  const sizeEl   = tab.root.querySelector('#flux-size');
-  const genBtn   = tab.root.querySelector('#flux-gen-btn');
-  const statusEl = tab.root.querySelector('#flux-status');
-  const gallery  = tab.root.querySelector('#flux-gallery');
+  const promptEl  = tab.root.querySelector('#flux-prompt');
+  const sizeEl    = tab.root.querySelector('#flux-size');
+  const genBtn    = tab.root.querySelector('#flux-gen-btn');
+  const statusEl  = tab.root.querySelector('#flux-status');
+  const spinnerEl = tab.root.querySelector('#flux-spinner');
+  const gallery   = tab.root.querySelector('#flux-gallery');
 
-  genBtn.addEventListener('click', async () => {
+  genBtn.addEventListener('click', () => {
     const prompt = promptEl.value.trim();
     if (!prompt) {
       statusEl.textContent = '⚠️ Please enter a prompt first.';
@@ -177,65 +198,70 @@ export function setup(ctx) {
     }
 
     const [width, height] = sizeEl.value.split('/');
-
-    // Pollinations AI — free Flux endpoint, no API key needed
-    // Docs: https://image.pollinations.ai/
     const seed = Math.floor(Math.random() * 999999);
     const encodedPrompt = encodeURIComponent(prompt);
     const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux&width=${width}&height=${height}&seed=${seed}&nologo=true`;
 
     genBtn.disabled = true;
-    statusEl.textContent = '⏳ Generating… (this can take 10–30 seconds)';
+    statusEl.textContent = '';
+    spinnerEl.classList.add('active');
 
-    try {
-      // Pre-load the image to confirm it loaded before showing
-      await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = imageUrl;
-      });
+    // Remove empty placeholder
+    const emptyMsg = gallery.querySelector('.flux-empty');
+    if (emptyMsg) emptyMsg.remove();
 
-      // Remove the "empty" placeholder if it exists
-      const emptyMsg = gallery.querySelector('.flux-empty');
-      if (emptyMsg) emptyMsg.remove();
+    // Build card immediately — let the browser load the image naturally
+    const card = document.createElement('div');
+    card.className = 'flux-img-card';
+    const shortPrompt = prompt.length > 60 ? prompt.slice(0, 57) + '…' : prompt;
 
-      // Build the card
-      const card = document.createElement('div');
-      card.className = 'flux-img-card';
+    const img = document.createElement('img');
+    img.alt = shortPrompt;
+    img.style.opacity = '0';
+    img.style.transition = 'opacity 0.4s';
 
-      const shortPrompt = prompt.length > 60 ? prompt.slice(0, 57) + '…' : prompt;
-
-      card.innerHTML = `
-        <img src="${imageUrl}" alt="${shortPrompt}" loading="lazy" />
-        <div class="flux-img-footer">
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${shortPrompt}</span>
-          <a class="flux-dl" href="${imageUrl}" download="flux-image-${seed}.jpg" target="_blank">⬇ Save</a>
-        </div>
-      `;
-
-      // Insert newest image at the top
-      gallery.insertBefore(card, gallery.firstChild);
+    img.onload = () => {
+      img.style.opacity = '1';
       statusEl.textContent = '✅ Done!';
-      setTimeout(() => { statusEl.textContent = ''; }, 3000);
-
-    } catch (err) {
-      statusEl.textContent = '❌ Generation failed. Try a different prompt or try again.';
-      console.error('[Flux Extension] Image load error:', err);
-    } finally {
+      spinnerEl.classList.remove('active');
       genBtn.disabled = false;
-    }
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    };
+
+    img.onerror = () => {
+      card.remove();
+      // If gallery is empty again, restore placeholder
+      if (gallery.children.length === 0) {
+        const ph = document.createElement('div');
+        ph.className = 'flux-empty';
+        ph.textContent = 'Your generated images will appear here.';
+        gallery.appendChild(ph);
+      }
+      statusEl.textContent = '❌ Pollinations timed out. Try again in a moment.';
+      spinnerEl.classList.remove('active');
+      genBtn.disabled = false;
+    };
+
+    // Set src AFTER attaching onload/onerror
+    img.src = imageUrl;
+
+    const footer = document.createElement('div');
+    footer.className = 'flux-img-footer';
+    footer.innerHTML = `
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${shortPrompt}</span>
+      <a class="flux-dl" href="${imageUrl}" target="_blank">⬇ Open</a>
+    `;
+
+    card.appendChild(img);
+    card.appendChild(footer);
+    gallery.insertBefore(card, gallery.firstChild);
   });
 
-  // Allow Ctrl+Enter / Cmd+Enter to generate
   promptEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       genBtn.click();
     }
   });
 
-  // Cleanup on teardown
-  return () => {
-    tab.destroy();
-  };
+  return () => { tab.destroy(); };
 }
