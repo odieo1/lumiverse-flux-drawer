@@ -10,11 +10,32 @@ export function setup(ctx) {
     id: 'flux_image_gen',
     title: 'Flux Image Generator',
     shortName: 'Image',
-    description: 'Generate images with Flux via Pollinations AI — free, no API key',
+    description: 'Generate images with Flux via Puter.js — free, no API key',
     keywords: ['image', 'flux', 'generate', 'art', 'picture', 'draw'],
     headerTitle: 'Image Generator',
     iconSvg: iconSvg,
   });
+
+  // Inject Puter.js script into the page if not already loaded
+  function loadPuter() {
+    return new Promise((resolve, reject) => {
+      if (window.puter) { resolve(window.puter); return; }
+      const script = document.createElement('script');
+      script.src = 'https://js.puter.com/v2/';
+      script.onload = () => {
+        // Give puter a moment to initialize
+        const wait = setInterval(() => {
+          if (window.puter && window.puter.ai) {
+            clearInterval(wait);
+            resolve(window.puter);
+          }
+        }, 100);
+        setTimeout(() => { clearInterval(wait); reject(new Error('Puter init timeout')); }, 8000);
+      };
+      script.onerror = () => reject(new Error('Failed to load Puter.js'));
+      document.head.appendChild(script);
+    });
+  }
 
   tab.root.innerHTML = `
     <style>
@@ -160,12 +181,14 @@ export function setup(ctx) {
       <textarea id="flux-prompt" placeholder="Describe the image you want to generate…"></textarea>
 
       <div class="flux-row">
-        <select id="flux-size">
-          <option value="1024/1024">1024×1024 (Square)</option>
-          <option value="1280/720">1280×720 (Landscape)</option>
-          <option value="720/1280">720×1280 (Portrait)</option>
-          <option value="1920/1080">1920×1080 (Wide)</option>
+        <select id="flux-model">
+          <option value="black-forest-labs/flux-schnell">Flux Schnell (fastest)</option>
+          <option value="black-forest-labs/FLUX.1-krea-dev">Flux Dev (better quality)</option>
+          <option value="black-forest-labs/flux-1.1-pro">Flux 1.1 Pro (best)</option>
         </select>
+      </div>
+
+      <div class="flux-row">
         <button class="flux-btn" id="flux-gen-btn">Generate</button>
       </div>
 
@@ -179,7 +202,7 @@ export function setup(ctx) {
   `;
 
   const promptEl  = tab.root.querySelector('#flux-prompt');
-  const sizeEl    = tab.root.querySelector('#flux-size');
+  const modelEl   = tab.root.querySelector('#flux-model');
   const genBtn    = tab.root.querySelector('#flux-gen-btn');
   const statusEl  = tab.root.querySelector('#flux-status');
   const spinnerEl = tab.root.querySelector('#flux-spinner');
@@ -192,24 +215,18 @@ export function setup(ctx) {
       return;
     }
 
-    const [width, height] = sizeEl.value.split('/');
-    const seed = Math.floor(Math.random() * 999999);
-    const encodedPrompt = encodeURIComponent(prompt);
-
-    // ✅ Updated to new gen.pollinations.ai unified endpoint
-    const imageUrl = `https://gen.pollinations.ai/image/${encodedPrompt}?model=flux&width=${width}&height=${height}&seed=${seed}&nologo=true`;
-
     genBtn.disabled = true;
-    statusEl.textContent = '⏳ Generating… (10–30 seconds)';
+    statusEl.textContent = '⏳ Loading generator…';
     spinnerEl.classList.add('active');
 
     try {
-      // Fetch as blob — works around CORS img preload issues
-      const response = await fetch(imageUrl);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const puter = await loadPuter();
 
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
+      statusEl.textContent = '🎨 Generating image… (15–40 seconds)';
+
+      const imgElement = await puter.ai.txt2img(prompt, {
+        model: modelEl.value,
+      });
 
       // Remove empty placeholder
       const emptyMsg = gallery.querySelector('.flux-empty');
@@ -220,9 +237,10 @@ export function setup(ctx) {
 
       const shortPrompt = prompt.length > 60 ? prompt.slice(0, 57) + '…' : prompt;
 
-      const img = document.createElement('img');
-      img.src = objectUrl;
-      img.alt = shortPrompt;
+      // puter returns a real <img> element — style it and use it directly
+      imgElement.style.width = '100%';
+      imgElement.style.display = 'block';
+      imgElement.style.borderRadius = '10px 10px 0 0';
 
       const footer = document.createElement('div');
       footer.className = 'flux-img-footer';
@@ -231,15 +249,17 @@ export function setup(ctx) {
       label.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
       label.textContent = shortPrompt;
 
+      // Build a save link from the img src
       const dlBtn = document.createElement('a');
       dlBtn.className = 'flux-dl';
-      dlBtn.href = objectUrl;
-      dlBtn.download = `flux-${seed}.jpg`;
       dlBtn.textContent = '⬇ Save';
+      dlBtn.target = '_blank';
+      dlBtn.href = imgElement.src;
+      dlBtn.download = `flux-${Date.now()}.png`;
 
       footer.appendChild(label);
       footer.appendChild(dlBtn);
-      card.appendChild(img);
+      card.appendChild(imgElement);
       card.appendChild(footer);
       gallery.insertBefore(card, gallery.firstChild);
 
@@ -247,8 +267,8 @@ export function setup(ctx) {
       setTimeout(() => { statusEl.textContent = ''; }, 3000);
 
     } catch (err) {
-      statusEl.textContent = `❌ Failed: ${err.message} — try again in a moment.`;
-      console.error('[Flux Extension] Error:', err);
+      statusEl.textContent = `❌ Error: ${err.message}`;
+      console.error('[Flux Extension] Puter error:', err);
     } finally {
       spinnerEl.classList.remove('active');
       genBtn.disabled = false;
